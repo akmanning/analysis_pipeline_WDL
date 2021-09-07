@@ -83,14 +83,26 @@ task unique_variant_id {
 		set -eux -o pipefail
 
 		# The Rscript in this task is unique in that it directly modifies
-		# the input files, rather than creating a fresh input file. For
-		# more information on this workaround, see Github.
+		# the input files, rather than creating a fresh input file. This 
+		# is problematic on Terra as Terra does not allow for this modification
+		# due to (1) the Docker container executing as a non-root user and (2) 
+		# the fact that Cromwell localizes files with only r-- permissions relative
+		# to non-root users, so the Rscript's openfn(readonly=false) call errors.
+		#
+		# Oddly enough, this DOES work on the local version of Cromwell for unknown
+		# reasons, even though it executes as the same non-root user and the files
+		# are localized with the same permissions... 
+		#
+		# Should this issue get fixed, or we find a way to wrangle the file
+		# permissions back under the non-root user's control (which Terra also
+		# tends to block), then we it would be better to softlink each file
+		# rather than duplicate it.
 
 		BASH_FILES=(~{sep=" " gdss})
 
 		for BASH_FILE in ${BASH_FILES[@]};
 		do
-			ln -s ${BASH_FILE} .
+			cp ${BASH_FILE} .
 		done
 
 		echo "Generating config file"
@@ -139,12 +151,13 @@ task unique_variant_id {
 		
 		exit()
 		CODE
-		
+
 		echo "Calling uniqueVariantIDs.R"		
 		sudo su - root
 		Rscript /usr/local/analysis_pipeline/R/unique_variant_ids.R unique_variant_ids.config
 	>>>
 	# Estimate disk size required
+	# Double up on GDS input due to twice localized workaround
 	Int gdss_size = ceil(size(gdss, "GB"))
 	Int finalDiskSize = 2*gdss_size + addldisk
 
