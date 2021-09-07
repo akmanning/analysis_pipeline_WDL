@@ -95,8 +95,7 @@ task unique_variant_id {
 		#
 		# Should this issue get fixed, or we find a way to wrangle the file
 		# permissions back under the non-root user's control (which Terra also
-		# tends to block), then we it would be better to softlink each file
-		# rather than duplicate it.
+		# tends to block), then we it won't need this duplication
 
 		BASH_FILES=(~{sep=" " gdss})
 
@@ -147,6 +146,10 @@ task unique_variant_id {
 			chr_array.append(chrom_num)
 		chrs = ' '.join(chr_array)
 
+		# Due to twice localized workaround, we are temporarily replacing
+		# the 0th component of the path with one representing the basename
+		base_path = os.path.basename(path[0])
+		path[0] = base_path
 		write_config(chrs, path)
 		
 		exit()
