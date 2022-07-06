@@ -682,7 +682,7 @@ task sbg_prepare_segments_1 {
 		docker: "uwgac/topmed-master@sha256:c564d54f5a3b9daed7a7677f860155f3b8c310b0771212c2eef1d6338f5c2600" # uwgac/topmed-master:2.12.0
 		disks: "local-disk " + dsk_size + " SSD"
 		maxRetries: "${retries}"
-		memory: "${memory} GB"
+		memory: "${memory}G"
 		preemptibles: "${preempt}"
 	}
 
