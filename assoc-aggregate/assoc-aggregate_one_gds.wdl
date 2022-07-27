@@ -418,9 +418,9 @@ task assoc_aggregate {
 	# segment. Note that this task contains several workarounds specific to the Terra file system.
 
 	input {	
-		File gds_file,
-		File aggregate_file,
-		File variant_include_file,
+		File gds_file
+		File aggregate_file
+		File variant_include_file
 		File segment_file # NOT the same as segment
 		File null_model_file
 		File phenotype_file
@@ -1088,8 +1088,7 @@ workflow assoc_agg_one_gds {
 			input:
 				gds_file = gds_file,
 				aggregate_file = aggregate_list.aggregate_list,
-				File variant_include_file,
-
+				variant_include_file = variant_include_file,
 				null_model_file = null_model_file,
 				phenotype_file = phenotype_file,
 				out_prefix = out_prefix,
