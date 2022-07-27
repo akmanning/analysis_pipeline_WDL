@@ -1141,7 +1141,7 @@ workflow assoc_agg_one_gds {
 	}
 
 	output {
-		File assoc_aggregate = assoc_aggregate.assoc_aggregate
+		File assoc_aggregate = assoc_combine_r.assoc_combined
 		Array[File] assoc_plots = assoc_plots_r.assoc_plots
 	}
 
