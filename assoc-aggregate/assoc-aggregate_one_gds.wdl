@@ -1073,7 +1073,12 @@ workflow assoc_agg_one_gds {
 			noop = wdl_validate_inputs.valid_genome_build
 	}
 	
-
+	call define_segments_r {
+		input:
+			segment_length = segment_length,
+			n_segments = n_segments,
+			genome_build = wdl_validate_inputs.valid_genome_build
+	}
 	
 	call aggregate_list {
 		input:
