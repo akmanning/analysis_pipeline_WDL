@@ -1029,7 +1029,7 @@ task assoc_plots_r {
 
 workflow assoc_agg_one_gds {
 	input {
-		String?      aggregate_type
+		String       aggregate_type
 		Float?       alt_freq_max
 		Boolean      debug = false  # WDL only, turns on debug prints
 		Boolean?     disable_thin
@@ -1045,7 +1045,7 @@ workflow assoc_agg_one_gds {
 		Int?         plot_mac_threshold
 		Array[Float]? rho
 		Int?         segment_length
-		String?      test
+		String       test
 		Int?         thin_nbins
 		Int?         thin_npoints
 		Float?       truncate_pval_threshold
