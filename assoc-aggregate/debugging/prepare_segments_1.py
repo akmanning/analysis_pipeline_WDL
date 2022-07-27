@@ -1,31 +1,67 @@
 # Author: Ash O'Farrell (aofarrel@ucsc.edu)
 #
+# This is a standalone version of the Pythonic aspect of assoc-aggregate.wdl's
+# sbg_prepare_segments_1 task, which is by far the most complicated WDL task in the pipeline.
+# If you intend on just using the WDL, this .py file is likely not useful to you.
+#
 # Notes:
-# 1. This needs to be run in Python2
+# 1. This needs Python2 - yeah, I know that's bad, but I don't wanna relitigate unicode right now
 # 2. This expects the input files to be in the workdir, or else it'll fail when making the zips
+#    (you can copy over test data from elsewhere in the repo easily with copytestdata.sh)
+#    Most WDLs would do fine with softlinks but afaik the zipping makes that not feasible
+# 3. Although this code has a lot of comments, it only makes sense in the context of the overall
+#    pipeline
+# 4. As always, an effort was made to mimic the CWL as much as possible, but the limitations
+#    of WDL means there's a lot of additional workarounds necessary
+# 5. Yes, this code results in duplicating dozens of files - I don't like it either, but this
+#    seems to be the least error-prone method for working within WDL's limitations
+# 6. Run cleanup.sh after this code as it will drop tons of zips into the workdir
 
 #~{segments_file}
-IIsegments_fileII = "segments.txt"
+segments_file_py = "segments.txt"
 
 # ['~{sep="','" input_gds_files}']
-IIinput_gds_filesII = ["1KG_phase3_subset_chr1.gds", "1KG_phase3_subset_chr2_butwithadifferentname.gds", "1KG_phase3_subset_chrX.gds"]
+input_gds_files_py = [
+"1KG_phase3_subset_chr1.gds",
+"1KG_phase3_subset_chr2_butwithadifferentname.gds",
+"1KG_phase3_subset_chr12.gds",
+"1KG_phase3_subset_chrX.gds"]
 
 #['~{sep="','" variant_include_files}']
-IIvariant_include_filesII = []
+variant_include_files_py = []
 
 #['~{sep="','" aggregate_files}']
-IIaggregate_filesII = ["aggregate_list_chr1.RData", "aggregate_list_chr2.RData", "aggregate_list_chrX.RData"]
+aggregate_files_py = [
+"aggregate_list_chr1.RData",
+"aggregate_list_chr2.RData",
+"aggregate_list_chr12.RData",
+"aggregate_list_chrX.RData"]
 
 from zipfile import ZipFile
 import os
 import shutil
 import datetime
 import logging
+import subprocess
 
 logging.basicConfig(level=logging.DEBUG)
 
+############## everything after this line should be mirrored in the WDL ##############
+
+def print_disk_usage(dotprod=-1):
+	'''Prints disk storage information, useful for debugging'''
+	if logging.root.level <= logging.INFO:
+		disk = ""
+		# this might be more helpful on certain backends
+		#if logging.root.level == logging.DEBUG:
+			#disk += subprocess.check_output(["df", "-H"])
+		if dotprod > -1:
+			disk += "After creating dotprod%s, disk space is " % dotprod
+		disk += subprocess.check_output(["du", "-hs"])
+		logging.info(disk)
+
 def find_chromosome(file):
-	# Corresponds with find_chromosome() in CWL
+	'''Corresponds with find_chromosome() in CWL'''
 	chr_array = []
 	chrom_num = split_on_chromosome(file)
 	if (unicode(str(chrom_num[1])).isnumeric()):
@@ -42,7 +78,7 @@ def split_on_chromosome(file):
 	return chrom_num
 
 def pair_chromosome_gds(file_array):
-	# Corresponds with pair_chromosome_gds() in CWL
+	'''Corresponds with pair_chromosome_gds() in CWL'''
 	gdss = dict() # forced to use constructor due to WDL syntax issues
 	for i in range(0, len(file_array)): 
 		# Key is chr number, value is associated GDS file
@@ -51,7 +87,7 @@ def pair_chromosome_gds(file_array):
 	return gdss
 
 def pair_chromosome_gds_special(file_array, agg_file):
-	# Corresponds with pair_chromosome_gds_special() in CWL
+	'''Corresponds with pair_chromosome_gds_special() in CWL'''
 	gdss = dict()
 	for i in range(0, len(file_array)):
 		gdss[find_chromosome(file_array[i])] = os.path.basename(agg_file)
@@ -59,25 +95,27 @@ def pair_chromosome_gds_special(file_array, agg_file):
 	return gdss
 
 def wdl_get_segments():
-	segfile = open(IIsegments_fileII, 'rb')
+	'''Corresponds with CWL's segments = self[0].contents.split("\n")'''
+	segfile = open(segments_file_py, 'rb')
 	segments = str((segfile.read(64000))).split('\n') # CWL x.contents only gets 64000 bytes
 	segfile.close()
 	segments = segments[1:] # segments = segments.slice(1) in CWL; removes first line
 	return segments
 
+print_disk_usage()
 logging.debug("\n######################\n# prepare gds output #\n######################")
-input_gdss = pair_chromosome_gds(IIinput_gds_filesII)
+input_gdss = pair_chromosome_gds(input_gds_files_py)
 output_gdss = []
 gds_segments = wdl_get_segments()
 for i in range(0, len(gds_segments)): # for(var i=0;i<segments.length;i++){
-		chr = gds_segments[i].split('\t')[0]
-		if(chr in input_gdss):
-			output_gdss.append(input_gdss[chr])
+	chr = gds_segments[i].split('\t')[0]
+	if(chr in input_gdss):
+		output_gdss.append(input_gdss[chr])
 logging.debug("GDS output prepared (len: %s)" % len(output_gdss))
 logging.debug(["%s " % thing for thing in output_gdss])
 
 logging.debug("\n######################\n# prepare seg output #\n######################")
-input_gdss = pair_chromosome_gds(IIinput_gds_filesII)
+input_gdss = pair_chromosome_gds(input_gds_files_py)
 output_segments = []
 actual_segments = wdl_get_segments()
 for i in range(0, len(actual_segments)): # for(var i=0;i<segments.length;i++){
@@ -87,32 +125,25 @@ for i in range(0, len(actual_segments)): # for(var i=0;i<segments.length;i++){
 		output_segments.append(int(seg_num))
 		output_seg_as_file = open("%s.integer" % seg_num, "w")
 
-# I don't know for sure if this case is actually problematic, but I suspect it will be.
-try:
-	if max(output_segments) != len(output_segments):
-		print("Debug: Max of list: %s. Len of list: %s." % 
-			[max(output_segments), len(output_segments)])
-		print("Debug: List is as follows:\n\t%s" % output_segments)
-		print("ERROR: output_segments needs to be a list of consecutive integers.")
-		exit(1)
-except TypeError:
-	# due to a quirk of the formatting strings above, TypeError gets thrown if chr X/Y/M present
-	# this allows us to warn user that our check for nonconsecutives won't work in those cases
-	logging.warning("Check for nonconsecutive integer chromosomes is being skipped.")
+# This shouldn't cause problems anymore, but just in case...
+if max(output_segments) != len(output_segments):
+	logging.warning("Maximum (%s) doesn't equal length (%s) of segment array. "
+		"This usually isn't an issue, so we'll continue..." % 
+		(max(output_segments), len(output_segments)))
 logging.debug("Segment output prepared (len: %s)" % len(output_segments))
-logging.debug(["%i" % thing for thing in output_segments])
+logging.debug("%s" % output_segments)
 
 logging.debug("\n######################\n# prepare agg output #\n######################")
 # The CWL accounts for there being no aggregate files as the CWL considers them an optional
 # input. We don't need to account for that because the way WDL works means it they are a
 # required output of a previous task and a required input of this task. That said, if this
 # code is reused for other WDLs, it may need some adjustments right around here.
-input_gdss = pair_chromosome_gds(IIinput_gds_filesII)
+input_gdss = pair_chromosome_gds(input_gds_files_py)
 agg_segments = wdl_get_segments()
-if 'chr' in os.path.basename(IIaggregate_filesII[0]):
-	input_aggregate_files = pair_chromosome_gds(IIaggregate_filesII)
+if 'chr' in os.path.basename(aggregate_files_py[0]):
+	input_aggregate_files = pair_chromosome_gds(aggregate_files_py)
 else:
-	input_aggregate_files = pair_chromosome_gds_special(IIinput_gds_filesII, IIaggregate_filesII[0])
+	input_aggregate_files = pair_chromosome_gds_special(input_gds_files_py, aggregate_files_py[0])
 output_aggregate_files = []
 for i in range(0, len(agg_segments)): # for(var i=0;i<segments.length;i++){
 	chr = agg_segments[i].split('\t')[0] # chr = segments[i].split('\t')[0]
@@ -124,10 +155,10 @@ logging.debug("Aggregate output prepared (len: %s)" % len(output_aggregate_files
 logging.debug(["%s " % thing for thing in output_aggregate_files])
 
 logging.debug("\n#########################\n# prepare varinc output #\n##########################")
-input_gdss = pair_chromosome_gds(IIinput_gds_filesII)
+input_gdss = pair_chromosome_gds(input_gds_files_py)
 var_segments = wdl_get_segments()
-if IIvariant_include_filesII != [""]:
-	input_variant_files = pair_chromosome_gds(IIvariant_include_filesII)
+if variant_include_files_py != [""]:
+	input_variant_files = pair_chromosome_gds(variant_include_files_py)
 	output_variant_files = []
 	for i in range(0, len(var_segments)):
 		chr = var_segments[i].split('\t')[0]
@@ -150,7 +181,7 @@ logging.debug(["%s " % thing for thing in output_variant_files])
 # We can only consistently tell output files apart by their extension. If var include files 
 # and agg files are both outputs, this is problematic, as they both share the RData ext.
 # Therefore we put var include files in a subdir.
-if IIvariant_include_filesII != [""]:
+if variant_include_files_py != [""]:
 	os.mkdir("varinclude")
 	os.mkdir("temp")
 
@@ -197,6 +228,7 @@ for i in range(0, len(output_segments)):
 		this_zip.write("varinclude/%s" % output_variant_files[i])
 	this_zip.close()
 	logging.info("Wrote dotprod%s.zip in %s minutes" % (plusone, divmod((datetime.datetime.now()-beginning).total_seconds(), 60)[0]))
+	print_disk_usage(plusone)
 logging.info("Finished. WDL executor will now attempt to delocalize the outputs. This step might take a long time.")
 logging.info("If delocalization is very slow, try running the task again with more disk space (which increases IO speed on Google backends),")
 logging.info("or you can try decreasing the number of segments.")
