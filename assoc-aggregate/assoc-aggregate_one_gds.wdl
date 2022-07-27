@@ -418,7 +418,7 @@ task assoc_aggregate {
 	# segment. Note that this task contains several workarounds specific to the Terra file system.
 
 	input {	
-		File gds.file,
+		File gds_file,
 		File aggregate_file,
 		File variant_include_file,
 		File segment_file # NOT the same as segment
