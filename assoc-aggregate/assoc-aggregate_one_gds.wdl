@@ -84,7 +84,7 @@ task wdl_validate_inputs {
 		if [[ ! "~{chromosome} = "" ]]
 		then
 			in_array=0
-			for thing in "${acceptable_chr_values[@]}"
+			for thing in "${acceptable_chromosome_values[@]}"
 			do
 				if [[ "^$thing$" = "^~{chromosome}$" ]]
 				then
