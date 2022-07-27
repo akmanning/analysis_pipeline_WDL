@@ -1036,7 +1036,7 @@ workflow assoc_agg_one_gds {
 		String?      genome_build
 		String?      group_id
 		File?        known_hits_file
-		File	     input_gds_files
+		File	     input_gds
 		Int?         n_segments=1
 		File         null_model_file
 		String?      out_prefix
@@ -1068,7 +1068,7 @@ workflow assoc_agg_one_gds {
 	
 	call sbg_gds_renamer {
 		input:
-			in_variant = gds_file,
+			in_variant = input_gds,
 			debug = debug,
 			noop = wdl_validate_inputs.valid_genome_build
 	}
@@ -1091,7 +1091,7 @@ workflow assoc_agg_one_gds {
    
 	call assoc_aggregate {
 			input:
-				gds_file = gds_file,
+				gds_file = input_gds,
 				aggregate_file = aggregate_list.aggregate_list,
 				variant_include_file = variant_include_file,
 				null_model_file = null_model_file,
