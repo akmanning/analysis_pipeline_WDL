@@ -19,8 +19,9 @@ task wdl_validate_inputs {
 	
 	input {
 		String? genome_build
-		String? aggregate_type
-		String? test
+		String  aggregate_type
+		String  test
+		String  chromosome
 
 		# no runtime attr because this is a trivial task that does not scale
 	}
@@ -31,6 +32,7 @@ task wdl_validate_inputs {
 		#acceptable genome builds: ("hg38" "hg19")
 		#acceptable aggreg types:  ("allele" "position")
 		acceptable_test_values=("burden" "skat" "smmat" "fastskat" "skato")
+		acceptable_chromosome_values=("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X","Y","M")
 
 		if [[ ! "~{genome_build}" = "" ]]
 		then
@@ -78,6 +80,25 @@ task wdl_validate_inputs {
 				echo "~{test} seems valid"
 			fi
 		fi
+		
+		if [[ ! "~{chromosome} = "" ]]
+		then
+			in_array=0
+			for thing in "${acceptable_chr_values[@]}"
+			do
+				if [[ "^$thing$" = "^~{chromosome}$" ]]
+				then
+					in_array=1
+				fi
+			done
+			if [[ $in_array = 0 ]]
+			then
+				echo "Invalid input for Chromosome. Must be 1, 2, ..., 22, X, Y or M."
+				exit 1
+			else
+				echo "input for Chromosome ~{chromosome} seems valid"
+			fi
+		fi			
 	>>>
 
 	runtime {
@@ -263,6 +284,7 @@ task aggregate_list {
 		File variant_group_file
 		String? aggregate_type
 		String? group_id
+		String chromosome
 
 		# there is an inconsistency in the CWL here...
 		# the parent CWL does not have out_file, but it does have out_prefix
@@ -387,6 +409,10 @@ task aggregate_list {
 			g = open("chromosome", "a")
 			g.write("--chromosome %s" % chromosome)
 			g.close()
+		else
+			g = open("chromosome", "a")
+			g.write("--chromosome %s" % ~{chromosome})
+			g.close()		
 		CODE
 
 		BASH_CHR=./chromosome
@@ -1054,6 +1080,7 @@ workflow assoc_agg_one_gds {
 		File?        variant_weight_file
 		String?      weight_beta
 		String?      weight_user
+		String	     chromosome
 	}
 
 	# In order to force this to run first, all other tasks that use these "psuedoenums"
@@ -1062,7 +1089,8 @@ workflow assoc_agg_one_gds {
 		input:
 			genome_build = genome_build,
 			aggregate_type = aggregate_type,
-			test = test
+			test = test,
+			chromosome = chromosome
 	}
 
 	
@@ -1084,7 +1112,8 @@ workflow assoc_agg_one_gds {
 		input:
 			variant_group_file = variant_group_file,
 			aggregate_type = wdl_validate_inputs.valid_aggregate_type,
-			group_id = group_id
+			group_id = group_id,
+			chromosome = chromosome
 	}
 	
  
