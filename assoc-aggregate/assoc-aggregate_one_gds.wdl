@@ -1110,11 +1110,25 @@ workflow assoc_agg_one_gds {
 				debug = debug
 	
 	}
-	
+	Array[File] flatten_array = flatten(select_all(assoc_aggregate.assoc_aggregate))
+	call sbg_group_segments_1 {
+			input:
+				assoc_files = flatten_array,
+				debug = debug
+	}
+
+	scatter(thing in sbg_group_segments_1.grouped_files_as_strings) {
+		call assoc_combine_r {
+			input:
+				assoc_files = thing,
+				assoc_type = "aggregate",
+				debug = debug
+		}
+	}
 
 	call assoc_plots_r {
 		input:
-			assoc_files = assoc_aggregate.assoc_aggregate,
+			assoc_files = assoc_combine_r.assoc_combined,
 			assoc_type = "aggregate",
 			plots_prefix = out_prefix,
 			disable_thin = disable_thin,
