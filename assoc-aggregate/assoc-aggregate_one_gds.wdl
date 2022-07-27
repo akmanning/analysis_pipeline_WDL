@@ -631,7 +631,7 @@ task assoc_aggregate {
 		# segments that do not give output. Working with Array[File?] is infinitely more difficult 
 		# than working with Array[File]?, trust me on this.
 		Array[File]? assoc_aggregate = glob("*.RData")
-		File config = glob("ins/*.config")[0]
+		File config = glob("*.config")[0]
 	}
 }
 
