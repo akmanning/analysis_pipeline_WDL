@@ -32,7 +32,7 @@ task wdl_validate_inputs {
 		#acceptable genome builds: ("hg38" "hg19")
 		#acceptable aggreg types:  ("allele" "position")
 		acceptable_test_values=("burden" "skat" "smmat" "fastskat" "skato")
-		acceptable_chromosome_values=("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X","Y","M")
+		acceptable_chromosome_values=("1" "2" "3" "4" "5" "6" "7" "8" "9" "10" "11" "12" "13" "14" "15" "16" "17" "18" "19" "20" "21" "22" "X" "Y" "M")
 
 		if [[ ! "~{genome_build}" = "" ]]
 		then
