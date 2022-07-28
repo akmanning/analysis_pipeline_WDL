@@ -409,10 +409,7 @@ task aggregate_list {
 			g = open("chromosome", "a")
 			g.write("--chromosome %s" % chromosome)
 			g.close()
-		else:
-			g = open("chromosome", "a")
-			g.write("--chromosome %s" % ~{chromosome})
-			g.close()		
+	
 		CODE
 
 		BASH_CHR=./chromosome
