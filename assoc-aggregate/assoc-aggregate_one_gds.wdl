@@ -409,7 +409,7 @@ task aggregate_list {
 			g = open("chromosome", "a")
 			g.write("--chromosome %s" % chromosome)
 			g.close()
-		else
+		else:
 			g = open("chromosome", "a")
 			g.write("--chromosome %s" % ~{chromosome})
 			g.close()		
