@@ -482,6 +482,7 @@ task assoc_aggregate {
 		set -eux -o pipefail
 		
 		echo ""
+		echo "creating segment file 1.integer"
 		echo "Calling Python..."
 		python << CODE
 		import os
@@ -527,8 +528,7 @@ task assoc_aggregate {
 		gds = wdl_find_file("gds") + ".gds"
 		agg = wdl_find_file("RData") + ".RData"
 		var = wdl_find_file("variantsRData") + ".variantsRData"
-		seg = 1
-		#seg = int(wdl_find_file("integer").rsplit(".", 1)[0]) # not used in Python context
+		seg = int(wdl_find_file("integer").rsplit(".", 1)[0]) # not used in Python context
 
 		chr = find_chromosome(gds) # runs on full path in the CWL
 		dir = os.getcwd()
@@ -551,6 +551,7 @@ task assoc_aggregate {
 		f.write('phenotype_file "~{phenotype_file}"\n')
 		f.write('aggregate_variant_file "%s/%s"\n' % (dir, agg))
 		f.write('null_model_file "~{null_model_file}"\n')
+		f.write('variant_include_file "%s"\n' % (dir, var))
 		# CWL accounts for null_model_params but this does not exist in aggregate context
 		if "~{rho}" != "":
 			f.write("rho ")
@@ -560,9 +561,6 @@ task assoc_aggregate {
 		f.write('segment_file "~{segment_file}"\n') # optional in CWL, never optional in WDL
 		if "~{test}" != "":
 			f.write('test "~{test}"\n') # cwl has test type, not sure if needed here
-		if os.path.isdir("varinclude"):
-			# although moved to the workdir, the folder previously containing it should still exist
-			f.write('variant_include_file "%s"\n' % var)
 		if "~{weight_beta}" != "":
 			f.write("weight_beta '~{weight_beta}'\n")
 		if "~{aggregate_type}" != "":
