@@ -480,7 +480,7 @@ task assoc_aggregate {
 
 	command <<<
 		set -eux -o pipefail
-
+		
 		echo ""
 		echo "Calling Python..."
 		python << CODE
@@ -610,7 +610,6 @@ task assoc_aggregate {
 		echo ""
 		echo "Running Rscript..."
 		Rscript /usr/local/analysis_pipeline/R/assoc_aggregate.R assoc_aggregate.config
-#		Rscript /usr/local/analysis_pipeline/R/assoc_aggregate.R assoc_aggregate.config --segment ${SEGMENT_NUM}
 
 		# The CWL has a commented out method for adding --chromosome to this. It's been replaced by
 		# the inputBinding for segment number, which we have to extract from a filename rather than
