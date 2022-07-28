@@ -458,6 +458,7 @@ task assoc_aggregate {
 		File? variant_weight_file
 		String? weight_user
 		String? genome_build # acts as enum
+		String chromosome
 
 		# runtime attr
 		Int addldisk = 50
@@ -487,50 +488,13 @@ task assoc_aggregate {
 		python << CODE
 		import os
 
-		def wdl_find_file(extension):
-			dir = os.getcwd()
-			ls = os.listdir(dir)
-			if "~{debug}" == "true":
-				print("Debug: Looking for %s in %s which contains %s" % (extension, dir, ls))
-			for i in range(0, len(ls)):
-				debug_split = ls[i].rsplit(".", 1)
-				if "~{debug}" == "true":
-					print("Debug: ls[i].rsplit('.', 1) is %s" % debug_split)
-				if len(ls[i].rsplit('.', 1)) == 2: # avoid stderr and stdout giving IndexError
-					if ls[i].rsplit(".", 1)[1] == extension:
-						return ls[i].rsplit(".", 1)[0]
-			return None
-
-		def split_on_chromosome(file):
-			chrom_num = file.split("chr")[1]
-			return chrom_num
-			
-		def find_chromosome(file):
-			chr_array = []
-			chrom_num = split_on_chromosome(file)
-			if len(chrom_num) == 1:
-				acceptable_chrs = [str(integer) for integer in list(range(1,22))]
-				acceptable_chrs.extend(["X","Y","M"])
-				if chrom_num in acceptable_chrs:
-					return chrom_num
-				else:
-					print("Error: %s appears to be an invalid chromosome number." % chrom_num)
-					exit(1)
-			elif (unicode(str(chrom_num[1])).isnumeric()):
-				# two digit number
-				chr_array.append(chrom_num[0])
-				chr_array.append(chrom_num[1])
-			else:
-				# one digit number or Y/X/M
-				chr_array.append(chrom_num[0])
-			return "".join(chr_array)
-
-		gds = wdl_find_file("gds") + ".gds"
-		agg = wdl_find_file("RData") + ".RData"
-		var = wdl_find_file("variantsRData") + ".variantsRData"
+		gds = "~{gds_file}"
+		agg = "~{aggregate_file}"
+		var = "~{variant_include_file}"
 		seg = int(wdl_find_file("integer").rsplit(".", 1)[0]) # not used in Python context
 
-		chr = find_chromosome(gds) # runs on full path in the CWL
+		chr = "~{chromosome}" # runs on full path in the CWL
+		
 		dir = os.getcwd()
 		if "~{debug}" == "true":
 			print("Debug: Current workdir is %s; config file will be written here" % dir)
@@ -547,18 +511,19 @@ task assoc_aggregate {
 				f.write('out_prefix "' + data_prefix[0]  + 'aggregate_chr'  + chr + os.path.basename(gds).split('chr'+chr)[1].split('.gds')[0] + '"' + "\n")
 
 		dir = os.getcwd()
-		f.write('gds_file "%s/%s"\n' % (dir, gds))
+		f.write('gds_file "%s"\n' % gds)
 		f.write('phenotype_file "~{phenotype_file}"\n')
-		f.write('aggregate_variant_file "%s/%s"\n' % (dir, agg))
+		f.write('aggregate_variant_file "%s"\n' % agg)
 		f.write('null_model_file "~{null_model_file}"\n')
-		f.write('variant_include_file "%s"\n' % (dir, var))
+		f.write('variant_include_file "%s"\n' % var)
+		
 		# CWL accounts for null_model_params but this does not exist in aggregate context
 		if "~{rho}" != "":
 			f.write("rho ")
 			for r in ['~{sep="','" rho}']:
 				f.write("%s " % r)
 			f.write("\n")
-		f.write('segment_file "~{segment_file}"\n') # optional in CWL, never optional in WDL
+		#f.write('segment_file "~{segment_file}"\n') # optional in CWL, never optional in WDL
 		if "~{test}" != "":
 			f.write('test "~{test}"\n') # cwl has test type, not sure if needed here
 		if "~{weight_beta}" != "":
@@ -1130,7 +1095,8 @@ workflow assoc_agg_one_gds {
 				variant_weight_file = variant_weight_file,
 				weight_user = weight_user,
 				genome_build = wdl_validate_inputs.valid_genome_build,
-				debug = debug
+				debug = debug,
+				chromosome = chromosome
 	
 	}
     
