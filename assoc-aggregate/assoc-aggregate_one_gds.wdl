@@ -22,6 +22,7 @@ task wdl_validate_inputs {
 		String  aggregate_type
 		String  test
 		String  chromosome
+		Int?	n_segments=1
 
 		# no runtime attr because this is a trivial task that does not scale
 	}
@@ -80,6 +81,14 @@ task wdl_validate_inputs {
 				echo "~{test} seems valid"
 			fi
 		fi
+		
+		if [[ ~{n_segments} -le 0 || ~{n_segments} -ge 11  ]]
+		then
+			echo "Invalid input for n_segment. Only a positive integer less than or equal to 10 is accepted"
+			exit 1
+		else
+			echo "n_segments ~{n_segments} seems valid"
+		fi	
 		
 		if [[ ! "~{chromosome}" = "" ]]
 		then
@@ -203,28 +212,27 @@ task sbg_gds_renamer {
 task define_segments_r {
 	# This task divides the entire genome into segments to improve parallelization in later tasks.
 	# As an absolute minimum, you will end up with one segment per chromosome.
-
 	# n_segments (optional)
 	# n_segments sets the number of segments. Note that n_segments assumes you are running on the
 	# full genome. For example, if you set n_segments to 100, but only run on chr1 and chr2, you can
 	# expect there to be about 15 segments as chr1 and chr2 together represent ~15% of the genome.
 	# The remaining segments won't be created, and your 15 segments will be parallelized in later
 	# tasks as 15 units, instead of 100.
-	
+
 	input {
 		Int? segment_length
 		Int? n_segments
+		Int chromosome
 		String? genome_build
-
 		# runtime attributes -- should be sufficient for hg19, maybe adjust if you're using hg38
 		Int cpu = 2
 		Int memory = 4
 		Int preempt = 3
 	}
-	
+
 	# this task doesn't localize input files, so it doesn't need much disk size
 	Int finalDiskSize = 10
-	
+
 	command <<<
 		set -eux -o pipefail
 		python << CODE
@@ -241,7 +249,7 @@ task define_segments_r {
 			if [[ ! "~{n_segments}" = "" ]]
 			then
 				# has both args
-				Rscript /usr/local/analysis_pipeline/R/define_segments.R --segment_length ~{segment_length} --n_segments ~{n_segments} define_segments.config
+				Rscript /usr/local/analysis_pipeline/R/define_segments.R --segment_length ~{segment_length} --n_segments $((~{n_segments} * 23)) define_segments.config
 			else
 				# has only seg length
 				Rscript /usr/local/analysis_pipeline/R/define_segments.R --segment_length ~{segment_length} define_segments.config
@@ -250,20 +258,24 @@ task define_segments_r {
 			if [[ ! "~{n_segments}" = "" ]]
 			then
 				# has only n segs
-				Rscript /usr/local/analysis_pipeline/R/define_segments.R --n_segments ~{n_segments} define_segments.config
+				Rscript /usr/local/analysis_pipeline/R/define_segments.R --n_segments $((~{n_segments} * 23)) define_segments.config
 			else
 				# has no args
 				Rscript /usr/local/analysis_pipeline/R/define_segments.R define_segments.config
 			fi
 		fi
-
+		cat segments.txt
+		R --vanilla << CODE
+		in.segments <- read.table("segments.txt",header=T,as.is=TRUE)
+		write.table(in.segments[which(in.segments[,1] == ~{chromosome}),],file="segments.txt",sep="\t",col.names=TRUE,row.names=FALSE,quote=FALSE)
+		CODE
+		cat segments.txt
 		# get the actual number of segments so we can scale sbg_prepare_segments_1 
 		lines=$(wc -l < "segments.txt")
-		segs="$((lines-2))"
+		segs="$((lines-1))"
 		echo $segs > "Iwishtopassthisbashvariableasanoutput.txt"
-
 	>>>
-	
+
 	runtime {
 		cpu: cpu
 		disks: "local-disk " + finalDiskSize + " HDD"
@@ -278,6 +290,7 @@ task define_segments_r {
 		File define_segments_output = "segments.txt"
 	}
 }
+
 
 task aggregate_list {
 	input {
@@ -298,6 +311,10 @@ task aggregate_list {
 		Int preempt = 2
 	}
 
+	# For simplified assoc-aggregate_one_gds.wdl, we can simplify this task quite a bit
+	# We no longer need to know which chromosome is being analyzed
+	# We use the files as provided
+
 	String basename_vargroup = basename(variant_group_file)
 	Int vargroup_size = ceil(size(variant_group_file, "GB"))
 	Int finalDiskSize = vargroup_size + addldisk
@@ -309,90 +326,18 @@ task aggregate_list {
 
 		python << CODE
 		import os
-		def find_chromosome(file):
-			chr_array = []
-			chrom_num = split_on_chromosome(file)
-			if len(chrom_num) == 1:
-				acceptable_chrs = [str(integer) for integer in list(range(1,22))]
-				acceptable_chrs.extend(["X","Y","M"])
-				print(acceptable_chrs)
-				print(type(chrom_num))
-				if chrom_num in acceptable_chrs:
-					return chrom_num
-				else:
-					print("%s appears to be an invalid chromosome number." % chrom_num)
-					exit(1)
-			elif (unicode(str(chrom_num[1])).isnumeric()):
-				# two digit number
-				chr_array.append(chrom_num[0])
-				chr_array.append(chrom_num[1])
-			else:
-				# one digit number or Y/X/M
-				chr_array.append(chrom_num[0])
-			return "".join(chr_array)
-
-		def split_on_chromosome(file):
-			chrom_num = file.split("chr")[1]
-			return chrom_num
-
+		
 		f = open("aggregate_list.config", "a")
 
 		# This part of the CWL is a bit confusing so let's walk through it line by line
 
-		#if (inputs.variant_group_file.basename.includes('chr'))
-		if "chr" in "~{basename_vargroup}":
-
-			#var chr = find_chromosome(inputs.variant_group_file.path);
-			chr = find_chromosome("~{variant_group_file}")
-			
-			# The next part of the CWL is:
-			#
-			# chromosomes_basename = inputs.variant_group_file.path.slice(0,-6).replace(/\/.+\//g,"");
-			#
-			# We know that inputs.variant_group_file is RData, so slice(0,6) removes ".RData",
-			# leaving a path with no extension. Then comes the regex in .replace():
-			#
-			# If given inputs/304343024/mygroupfile  --regex--> inputsmygroupfile.RData
-			# If given /inputs/304343024/mygroupfile --regex--> mygroupfile
-			#
-			# The second is the clear intention, and seems to match CWL's behavior of including the
-			# leading slash in file names. Interestingly, this seems to be equivalent to the CWL
-			# built-in nameroot function. CWL nameroot = python basename iff we drop the extension,
-			# so we mimic their slicing of the last six characters, but not the regex.
-			chromosomes_basename = os.path.basename("~{variant_group_file}"[:-6])
-
-			
-			# for(i = chromosomes_basename.length - 1; i > 0; i--)
-			for i in range(0, len(chromosomes_basename)):
-
-				#if(chromosomes_basename[i] != 'X' && chromosomes_basename[i] != "Y" && isNaN(chromosomes_basename[i]))
-				if chromosomes_basename[i] not in ["X","Y","1","2","3","4","5","6","7","8","9","0"]:
-					
-					#break;
-					break
-			
-			# Finally, after all that, chromosomes_basename gets overwritten anyway
-			chromosomes_basename_1 = "~{basename_vargroup}".split('chr'+chr)[0]
-			chromosomes_basename_2 = "chr "
-			chromosomes_basename_3 = "~{basename_vargroup}".split('chr'+chr)[1]
-			chromosomes_basename = chromosomes_basename_1 + chromosomes_basename_2 + chromosomes_basename_3
-			
-			f.write('variant_group_file "%s"\n' % chromosomes_basename)
-		
-		else:
-			f.write('variant_group_file "~{basename_vargroup}"\n')
+		f.write('variant_group_file "~{basename_vargroup}"\n')
 
 		# If there is a chr in the variant group file, a chr must be present in the output file
 		if "~{out_file}" != "":
-			if "chr" in "~{out_file}":
-				f.write('out_file "~{out_file} .RData"\n')
-			else:
-				f.write('out_file "~{out_file}.RData"\n')
+			f.write('out_file "~{out_file}.chr .RData"\n')
 		else:
-			if "chr" in "~{basename_vargroup}":
-				f.write('out_file "aggregate_list_chr .RData"\n')
-			else:
-				f.write('out_file "aggregate_list.RData"\n')
+			f.write('out_file "aggregate_list.chr .RData"\n')
 
 		if "~{aggregate_type}" != "":
 			f.write('aggregate_type "~{aggregate_type}"\n')
@@ -402,23 +347,11 @@ task aggregate_list {
 
 		f.write("\n")
 		f.close()
-
-		# this corresponds to line 195 of CWL
-		if "chr" in "~{basename_vargroup}":
-			chromosome = find_chromosome("~{variant_group_file}")
-			g = open("chromosome", "a")
-			g.write("--chromosome %s" % chromosome)
-			g.close()
 	
 		CODE
 
-		BASH_CHR=./chromosome
-		if test -f "$BASH_CHR"
-		then
-			Rscript /usr/local/analysis_pipeline/R/aggregate_list.R aggregate_list.config $(cat ./chromosome)
-		else
-			Rscript /usr/local/analysis_pipeline/R/aggregate_list.R aggregate_list.config
-		fi
+		Rscript /usr/local/analysis_pipeline/R/aggregate_list.R aggregate_list.config --chromosome ~{chromosome}
+
 	>>>
 
 	runtime {
@@ -442,8 +375,8 @@ task assoc_aggregate {
 
 	input {	
 		File gds_file
-		File aggregate_file
-		File variant_include_file
+		File aggregate_file # an RData file with GRanges object
+		File? variant_include_file
 		File segment_file # NOT the same as segment
 		File null_model_file
 		File phenotype_file
@@ -451,7 +384,7 @@ task assoc_aggregate {
 		Array[Float]? rho
 		String? test # acts as enum
 		String? weight_beta
-		Int? segment # not used in WDL
+		Int segment
 		String? aggregate_type # acts as enum
 		Float? alt_freq_max
 		Boolean? pass_only
@@ -463,7 +396,7 @@ task assoc_aggregate {
 		# runtime attr
 		Int addldisk = 50
 		Int cpu = 4
-		Int retries = 2
+		Int retries = 1
 		Int memory = 16
 		Int preempt = 1
 
@@ -483,21 +416,55 @@ task assoc_aggregate {
 		set -eux -o pipefail
 		
 		echo ""
-		echo "creating segment file 1.integer"
+		if [[ "~{variant_include_file}" = "" ]]
+		then
+		
+		R --vanilla << CODE
+		library(readr)
+		library(SeqArray)
+		library(GenomicRanges)
+		library(GWASTools)
+		annotation <- "~{aggregate_file}"
+		agg <- getobj(annotation)
+
+		gds_file <- "~{gds_file}"
+		gds <- seqOpen(gds_file)
+		if("~{aggregate_type}" == "allele") {
+			chr.position.allele <- seqGetData(gds, "\$chrom_pos_allele")
+			head(chr.position.allele)
+			id <-  seqGetData(gds, "variant.id")
+			agg <- data.frame(agg)
+			variant_ids_to_include <- id[which(chr.position.allele %in% paste0(agg\$seqnames,":",agg\$start,"_",agg\$ref,"_",agg\$alt))]
+		} else {
+			seqSetFilter(gds,agg)
+			variant_ids_to_include <-  seqGetData(gds, "variant.id")
+		}
+		seqClose(gds)
+		print(paste("Number of variants selected:",length(variant_ids_to_include)))
+
+		save(variant_ids_to_include,file=paste0(basename(annotation),".variantidsRData"))
+
+		CODE
+		
+		fi
+		
 		echo "Calling Python..."
 		python << CODE
 		import os
 
 		gds = "~{gds_file}"
 		agg = "~{aggregate_file}"
-		var = "~{variant_include_file}"
-		seg = int(wdl_find_file("integer").rsplit(".", 1)[0]) # not used in Python context
+		if "~{variant_include_file}" == "":
+			var = os.path.basename(agg) + '.variantidsRData'
+		else:
+			var = "~{variant_include_file}"
 
 		chr = "~{chromosome}" # runs on full path in the CWL
 		
 		dir = os.getcwd()
 		if "~{debug}" == "true":
 			print("Debug: Current workdir is %s; config file will be written here" % dir)
+
 		f = open("assoc_aggregate.config", "a")
 		
 		if "~{out_prefix}" != "":
@@ -506,11 +473,10 @@ task assoc_aggregate {
 			data_prefix = os.path.basename(gds).split('chr') # runs on basename in the CWL
 			data_prefix2 = os.path.basename(gds).split('.chr')
 			if len(data_prefix) == len(data_prefix2):
-				f.write('out_prefix "' + data_prefix2[0] + '_aggregate_chr' + chr + os.path.basename(gds).split('chr'+chr)[1].split('.gds')[0] + '"'+ "\n")
+				f.write('out_prefix "' + data_prefix2[0] + '_aggregate_chr' + chr + '"' + "\n")
 			else:
-				f.write('out_prefix "' + data_prefix[0]  + 'aggregate_chr'  + chr + os.path.basename(gds).split('chr'+chr)[1].split('.gds')[0] + '"' + "\n")
+				f.write('out_prefix "' + data_prefix[0]  + 'aggregate_chr'  + chr + '"' + "\n")
 
-		dir = os.getcwd()
 		f.write('gds_file "%s"\n' % gds)
 		f.write('phenotype_file "~{phenotype_file}"\n')
 		f.write('aggregate_variant_file "%s"\n' % agg)
@@ -523,7 +489,7 @@ task assoc_aggregate {
 			for r in ['~{sep="','" rho}']:
 				f.write("%s " % r)
 			f.write("\n")
-		#f.write('segment_file "~{segment_file}"\n') # optional in CWL, never optional in WDL
+		f.write('segment_file "~{segment_file}"\n') # optional in CWL, never optional in WDL
 		if "~{test}" != "":
 			f.write('test "~{test}"\n') # cwl has test type, not sure if needed here
 		if "~{weight_beta}" != "":
@@ -563,20 +529,12 @@ task assoc_aggregate {
 			echo "Debug: Location of file(s):"
 			echo ""
 			find -name *.config
-			echo "Debug: Location of file(s) representing chromosome number:"
 			echo ""
-			find -name *.integer
-			echo ""
-			echo "Debug: Searching for the segment number or letter in input directory..."
 		fi
 
 		echo ""
 		echo "Running Rscript..."
-		Rscript /usr/local/analysis_pipeline/R/assoc_aggregate.R assoc_aggregate.config
-
-		# The CWL has a commented out method for adding --chromosome to this. It's been replaced by
-		# the inputBinding for segment number, which we have to extract from a filename rather than
-		# an input variable.
+		Rscript /usr/local/analysis_pipeline/R/assoc_aggregate.R assoc_aggregate.config --segment ~{segment}
 
 		if [[ "~{debug}" = "true" ]]
 		then
@@ -803,9 +761,9 @@ task assoc_combine_r {
 		f.write('assoc_type "~{assoc_type}"\n')
 		data_prefix = os.path.basename(python_assoc_files[0]).split('_chr')[0]
 		if "~{out_prefix}" != "":
-			f.write('out_prefix "~{out_prefix}"\n')
+			f.write('out_prefix "./~{out_prefix}"\n')
 		else:
-			f.write('out_prefix "%s"\n' % data_prefix)
+			f.write('out_prefix "./%s"\n' % data_prefix)
 		if "~{conditional_variant_file}" != "":
 			f.write('conditional_variant_file "~{conditional_variant_file}"\n')
 		f.close()
@@ -937,13 +895,9 @@ task assoc_plots_r {
 
 		f = open("assoc_file.config", "a")
 
-		# hardcoded in the CWL
-		f.write('out_prefix "assoc_single"\n')
-
 		a_file = python_assoc_files[0]
 		chr = find_chromosome(os.path.basename(a_file))
 		path = a_file.split('chr'+chr)
-		extension = path[1].rsplit('.')[-1] # note different logic from CWL
 
 		if "~{plots_prefix}" != "":
 			f.write('plots_prefix ~{plots_prefix}\n')
@@ -1035,7 +989,7 @@ workflow assoc_agg_one_gds {
 		Int?         thin_npoints
 		Float?       truncate_pval_threshold
 		File         variant_group_file
-		File 	     variant_include_file
+		File? 	     variant_include_file
 		File?        variant_weight_file
 		String?      weight_beta
 		String?      weight_user
@@ -1064,7 +1018,8 @@ workflow assoc_agg_one_gds {
 		input:
 			segment_length = segment_length,
 			n_segments = n_segments,
-			genome_build = wdl_validate_inputs.valid_genome_build
+			genome_build = wdl_validate_inputs.valid_genome_build,
+			chromosome = chromosome
 	}
 	
 	call aggregate_list {
@@ -1075,32 +1030,36 @@ workflow assoc_agg_one_gds {
 			chromosome = chromosome
 	}
 	
- 
-   
-	call assoc_aggregate {
-			input:
-				gds_file = input_gds,
-				aggregate_file = aggregate_list.aggregate_list,
-				variant_include_file = variant_include_file,
-				null_model_file = null_model_file,
-				phenotype_file = phenotype_file,
-				out_prefix = out_prefix,
-				rho = rho,
-				segment_file = define_segments_r.define_segments_output,
-				test = wdl_validate_inputs.valid_test,
-				weight_beta = weight_beta,
-				aggregate_type = wdl_validate_inputs.valid_aggregate_type,
-				alt_freq_max = alt_freq_max,
-				pass_only = pass_only,
-				variant_weight_file = variant_weight_file,
-				weight_user = weight_user,
-				genome_build = wdl_validate_inputs.valid_genome_build,
-				debug = debug,
-				chromosome = chromosome
+	# the range function returns [0, 1, 2 ..., actual_number_of_segments - 1 ]
+	# we want [1, 2, 3 ..., actual_number_of_segments 
 	
-	}
+ 	Array[Int] integers = range(define_segments_r.actual_number_of_segments)
+	scatter(i in integers) {
+		call assoc_aggregate {
+				input:
+					gds_file = input_gds,
+					aggregate_file = aggregate_list.aggregate_list,
+					variant_include_file = variant_include_file,
+					null_model_file = null_model_file,
+					phenotype_file = phenotype_file,
+					out_prefix = out_prefix,
+					rho = rho,
+					segment_file = define_segments_r.define_segments_output,
+					test = wdl_validate_inputs.valid_test,
+					weight_beta = weight_beta,
+					aggregate_type = wdl_validate_inputs.valid_aggregate_type,
+					alt_freq_max = alt_freq_max,
+					pass_only = pass_only,
+					variant_weight_file = variant_weight_file,
+					weight_user = weight_user,
+					genome_build = wdl_validate_inputs.valid_genome_build,
+					debug = debug,
+					chromosome = chromosome,
+					segment = i + 1
+		}
+    }
     
-	Array[File] flatten_array  = flatten(select_all([assoc_aggregate.assoc_aggregate]))
+	Array[File] flatten_array  = flatten(select_all(assoc_aggregate.assoc_aggregate))
     
 	call sbg_group_segments_1 {
 			input:
